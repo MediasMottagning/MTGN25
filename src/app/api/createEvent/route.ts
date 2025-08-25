@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth, db, storage } from '../../lib/firebaseAdmin';
 import admin from 'firebase-admin';
 
+// Configure route to handle large files
+export const runtime = 'nodejs';
+export const maxDuration = 60; // 60 seconds timeout
+export const dynamic = 'force-dynamic';
+
 /* API for creating new events with Google Drive links */
 export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('Authorization');
