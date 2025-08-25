@@ -58,7 +58,9 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
       
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2 });
+        // Reduce scale for large PDFs to keep file size manageable
+        const scale = pdf.numPages > 20 ? 1.5 : 2;
+        const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.width = viewport.width;
@@ -68,14 +70,16 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         }
         await page.render({ canvasContext: context, viewport }).promise;
         
-        // Convert canvas to blob
-        const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+        // Convert canvas to blob with compression
+        const blob: Blob = await new Promise((resolve) => {
+          canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.8); // Use JPEG with 80% quality for smaller size
+        });
         images.push(blob);
       }
 
       const formData = new FormData();
       images.forEach((img, idx) => {
-        formData.append('images[]', img, `page-${idx + 1}.png`);
+        formData.append('images[]', img, `page-${idx + 1}.jpg`);
       });
       formData.append('pdfName', pdfNameWithoutExtension);
       formData.append('displayName', customName);
