@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth, storage } from '../../lib/firebaseAdmin';
 
+// Configure route to handle large files
+export const runtime = 'nodejs';
+export const maxDuration = 60; // 60 seconds timeout
+export const dynamic = 'force-dynamic';
 
 const CACHE_MAX_AGE = 60 * 60 * 24 * 30; // 1 month in seconds
 
