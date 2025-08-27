@@ -30,6 +30,12 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Prevent multiple submissions
+    if (uploading) {
+      return;
+    }
+    
     setSuccess(null);
     setError(null);
 
@@ -66,6 +72,12 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
       const uploadedPaths: string[] = [];
       
+      console.log(`Processing PDF with ${pdf.numPages} pages`);
+      
+      if (pdf.numPages === 0) {
+        throw new Error('PDF has no pages');
+      }
+      
       // Upload images directly to Firebase Storage
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
@@ -92,14 +104,24 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         const storagePath = `blandare/${sanitizedPdfName}/${fileName}`;
         const storageRef = ref(storage, storagePath);
         
+        console.log(`Uploading page ${i} to ${storagePath}`);
+        
         try {
           await uploadBytes(storageRef, webpBlob);
-          // Just store the path, not the download URL
           uploadedPaths.push(storagePath);
+          console.log(`Successfully uploaded page ${i}`);
         } catch (uploadError) {
           console.error(`Failed to upload page ${i}:`, uploadError);
-          throw new Error(`Failed to upload page ${i}`);
+          const errorMessage = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          throw new Error(`Failed to upload page ${i}: ${errorMessage}`);
         }
+      }
+
+      console.log(`Successfully uploaded ${uploadedPaths.length} pages for ${sanitizedPdfName}`);
+      
+      // Validate that we have uploaded paths before sending to API
+      if (uploadedPaths.length === 0) {
+        throw new Error('No images were successfully uploaded');
       }
 
       // Now send the metadata to the API

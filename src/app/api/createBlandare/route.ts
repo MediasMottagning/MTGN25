@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
     // Parse JSON request body (images are already uploaded to Firebase Storage)
     const { pdfName: rawPdfName, displayName, uploadedPaths, pageCount } = await req.json();
     
+    console.log('Received request:', { rawPdfName, displayName, uploadedPaths: uploadedPaths?.length, pageCount });
+    
     if (!rawPdfName) {
         return NextResponse.json({ error: 'Missing required field: pdfName' }, { status: 400 });
     }
@@ -46,6 +48,7 @@ export async function POST(req: NextRequest) {
 
     // Validate required fields
     if (!uploadedPaths || uploadedPaths.length === 0) {
+        console.log('Validation failed - uploadedPaths:', uploadedPaths);
         return NextResponse.json({ error: 'Missing required fields: uploadedPaths' }, { status: 400 });
     }
 
