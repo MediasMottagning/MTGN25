@@ -50,9 +50,13 @@ export default function ProfilePictureUploader() {
       setSuccess('Profile picture updated successfully!');
       setProfilePicUid('');
       setImagePreview(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error uploading profile picture:', error);
-      setError(error.message || 'Failed to upload profile picture');
+      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as any).message === 'string') {
+        setError((error as { message: string }).message);
+      } else {
+        setError('Failed to upload profile picture');
+      }
     } finally {
       setUploading(false);
     }

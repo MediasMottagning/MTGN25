@@ -72,7 +72,7 @@ export default function EventsList({
             if (blob) {
               resolve(blob);
             } else {
-              reject(new Error('Failed to convert image to WebP'));
+                reject(new Error(`Failed to convert image to WebP. Input file type: ${file.type}, requested output format: image/webp. This may be due to browser limitations or unsupported image format.`));
             }
           },
           'image/webp',
