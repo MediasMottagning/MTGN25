@@ -42,6 +42,49 @@ export default function EventsList({
   const [updateError, setUpdateError] = useState('');
   const [updating, setUpdating] = useState(false);
 
+  const convertToWebP = (file: File, quality: number = 0.8, maxWidth: number = 800, maxHeight: number = 600): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      img.onload = () => {
+        let { width, height } = img;
+
+        if (width > maxWidth || height > maxHeight) {
+          const aspectRatio = width / height;
+
+          if (width > height) {
+            width = Math.min(width, maxWidth);
+            height = width / aspectRatio;
+          } else {
+            height = Math.min(height, maxHeight);
+            width = height * aspectRatio;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to convert image to WebP'));
+            }
+          },
+          'image/webp',
+          quality
+        );
+      };
+
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('sv-SE', { 
@@ -55,14 +98,25 @@ export default function EventsList({
 
   const formatEventDate = (dateString?: string) => {
     if (!dateString) return 'No date set';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('sv-SE', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    
+    try {
+      const date = new Date(dateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return 'Invalid date';
+      }
+      
+      return date.toLocaleDateString('sv-SE', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'Invalid date';
+    }
   };
 
   const handleStartEdit = (event: Event) => {
@@ -70,12 +124,11 @@ export default function EventsList({
     setEditEventName(event.name);
     setEditEventDriveUrl(event.driveUrl);
     
-    if (event.eventDate) {
-      const eventDate = new Date(event.eventDate);
-      setEditEventDate(eventDate.toISOString().split('T')[0]);
-      setEditEventHour(eventDate.getHours().toString().padStart(2, '0'));
-      setEditEventMinute(eventDate.getMinutes().toString().padStart(2, '0'));
-    }
+    // Start with empty date/time fields so users can choose what to change
+    // The current values will be preserved if these are left empty
+    setEditEventDate('');
+    setEditEventHour('');
+    setEditEventMinute('');
     
     setEditEventThumbnail(null);
     setUpdateError('');
@@ -98,22 +151,68 @@ export default function EventsList({
     setUpdating(true);
 
     try {
-      const formData = new FormData();
-      formData.append('eventId', editingEventId!);
-      formData.append('name', editEventName);
-      formData.append('driveUrl', editEventDriveUrl);
+      // Prepare update data
+      const updateData: any = {
+        eventId: editingEventId!,
+        name: editEventName,
+        driveUrl: editEventDriveUrl,
+      };
       
+      // Handle thumbnail conversion to WebP and base64 if provided
       if (editEventThumbnail) {
-        formData.append('thumbnail', editEventThumbnail);
+        try {
+          const webpBlob = await convertToWebP(editEventThumbnail);
+          
+          const reader = new FileReader();
+          const base64Data = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(webpBlob);
+          });
+          
+          updateData.thumbnailData = base64Data;
+          updateData.thumbnailFileName = editEventThumbnail.name;
+        } catch (thumbnailError) {
+          setUpdateError('Failed to process thumbnail image.');
+          setUpdating(false);
+          return;
+        }
       }
       
+      // Only include date if all fields are provided, otherwise leave it unchanged
       if (editEventDate && editEventHour && editEventMinute) {
-        const eventDateTime = new Date(`${editEventDate}T${editEventHour}:${editEventMinute}`);
-        formData.append('eventDate', eventDateTime.toISOString());
+        // Ensure hour and minute are valid numbers
+        const hour = parseInt(editEventHour, 10);
+        const minute = parseInt(editEventMinute, 10);
+        
+        if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+          setUpdateError('Invalid time format. Please select valid hour and minute.');
+          setUpdating(false);
+          return;
+        }
+        
+        try {
+          const eventDateTime = new Date(`${editEventDate}T${editEventHour.padStart(2, '0')}:${editEventMinute.padStart(2, '0')}`);
+          
+          // Validate the constructed date
+          if (isNaN(eventDateTime.getTime())) {
+            setUpdateError('Invalid date format. Please check your date and time inputs.');
+            setUpdating(false);
+            return;
+          }
+          
+          updateData.eventDate = eventDateTime.toISOString();
+        } catch (dateError) {
+          setUpdateError('Invalid date format. Please check your date and time inputs.');
+          setUpdating(false);
+          return;
+        }
       }
+      // If any date/time field is empty, don't include eventDate in the update - keep existing value
 
       if (!user) {
         setUpdateError('Authentication required');
+        setUpdating(false);
         return;
       }
       
@@ -121,17 +220,31 @@ export default function EventsList({
       const response = await fetch('/api/updateEvent', {
         method: 'PUT',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: formData,
+        body: JSON.stringify(updateData),
       });
 
       if (response.ok) {
         handleCancelEdit();
         onRefresh();
       } else {
-        const errorData = await response.json();
-        setUpdateError(errorData.error || 'Failed to update event');
+        // Handle non-JSON error responses gracefully
+        let errorMessage = 'Failed to update event';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (jsonError) {
+          // If JSON parsing fails, try to get text response
+          try {
+            const textResponse = await response.text();
+            errorMessage = textResponse || `HTTP ${response.status}: ${response.statusText}`;
+          } catch (textError) {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+        }
+        setUpdateError(errorMessage);
       }
     } catch (error) {
       console.error('Error updating event:', error);
@@ -210,8 +323,10 @@ export default function EventsList({
                         value={editEventDate}
                         onChange={(e) => setEditEventDate(e.target.value)}
                         className="border border-gray-300 rounded-lg p-2 w-full text-sm"
-                        required
                       />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Leave empty to keep current date
+                      </p>
                     </div>
                     
                     <div>
@@ -221,9 +336,8 @@ export default function EventsList({
                           value={editEventHour}
                           onChange={(e) => setEditEventHour(e.target.value)}
                           className="border border-gray-300 rounded-lg p-2 w-full text-sm"
-                          required
                         >
-                          <option value="">Hour</option>
+                          <option value="">Keep current hour</option>
                           {Array.from({ length: 24 }, (_, i) => (
                             <option key={i} value={i.toString().padStart(2, '0')}>
                               {i.toString().padStart(2, '0')}
@@ -234,9 +348,8 @@ export default function EventsList({
                           value={editEventMinute}
                           onChange={(e) => setEditEventMinute(e.target.value)}
                           className="border border-gray-300 rounded-lg p-2 w-full text-sm"
-                          required
                         >
-                          <option value="">Minute</option>
+                          <option value="">Keep current minute</option>
                           {['00', '15', '30', '45'].map((minute) => (
                             <option key={minute} value={minute}>
                               {minute}
@@ -244,6 +357,9 @@ export default function EventsList({
                           ))}
                         </select>
                       </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Leave empty to keep current time
+                      </p>
                     </div>
                     
                     <div>
