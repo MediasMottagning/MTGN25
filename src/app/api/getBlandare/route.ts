@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
             
             const imageUrls = await Promise.all(
                 imageFiles
-                    .filter(f => f.name.match(/\.(png|jpg|jpeg)$/i))
+                    .filter(f => f.name.match(/\.(png|jpg|jpeg|webp)$/i))
                     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
                     .map(async (imgFile) => {
                         const [url] = await imgFile.getSignedUrl({
