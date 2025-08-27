@@ -1,6 +1,8 @@
 "use client"
 import React, { useRef, useState, useEffect } from 'react';
 import { useAuth } from '../useAuth';
+import { storage } from '../../lib/firebaseConfig';
+import { ref, uploadBytes } from 'firebase/storage';
 
 interface UploadBlandareFormProps {
   onBlandareUploaded?: () => void;
@@ -54,8 +56,9 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
       const arrayBuffer = await file.arrayBuffer();
       const { pdfjs } = await import('react-pdf');
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-      const images: Blob[] = [];
+      const uploadedPaths: string[] = [];
       
+      // Upload images directly to Firebase Storage
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const viewport = page.getViewport({ scale: 2 });
@@ -68,22 +71,42 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         }
         await page.render({ canvasContext: context, viewport }).promise;
         
-        // Convert canvas to blob
-        const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
-        images.push(blob);
+        // Convert canvas to WebP blob with compression
+        const webpBlob: Blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to convert to WebP'));
+          }, 'image/webp', 0.7); // 70% quality
+        });
+        
+        // Upload directly to Firebase Storage
+        const fileName = `page-${i}.webp`;
+        const storagePath = `blandare/${pdfNameWithoutExtension}/${fileName}`;
+        const storageRef = ref(storage, storagePath);
+        
+        try {
+          await uploadBytes(storageRef, webpBlob);
+          // Just store the path, not the download URL
+          uploadedPaths.push(storagePath);
+        } catch (uploadError) {
+          console.error(`Failed to upload page ${i}:`, uploadError);
+          throw new Error(`Failed to upload page ${i}`);
+        }
       }
 
-      const formData = new FormData();
-      images.forEach((img, idx) => {
-        formData.append('images[]', img, `page-${idx + 1}.png`);
-      });
-      formData.append('pdfName', pdfNameWithoutExtension);
-      formData.append('displayName', customName);
-      
+      // Now just send metadata to the API
       const res = await fetch('/api/createBlandare', {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` })
+        },
+        body: JSON.stringify({
+          pdfName: pdfNameWithoutExtension,
+          displayName: customName,
+          uploadedPaths: uploadedPaths,
+          pageCount: pdf.numPages
+        }),
       });
       
       if (!res.ok) {
