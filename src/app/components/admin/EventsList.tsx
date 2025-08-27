@@ -141,18 +141,46 @@ export default function EventsList({
     setUpdating(true);
 
     try {
-      const formData = new FormData();
-      formData.append('eventId', editingEventId!);
-      formData.append('name', editEventName);
-      formData.append('driveUrl', editEventDriveUrl);
-      
-      if (editEventThumbnail) {
-        formData.append('thumbnail', editEventThumbnail);
-      }
+      const updateData: any = {
+        eventId: editingEventId!,
+        name: editEventName,
+        driveUrl: editEventDriveUrl,
+      };
       
       if (editEventDate && editEventHour && editEventMinute) {
         const eventDateTime = new Date(`${editEventDate}T${editEventHour}:${editEventMinute}`);
-        formData.append('eventDate', eventDateTime.toISOString());
+        updateData.eventDate = eventDateTime.toISOString();
+      }
+      
+      if (editEventThumbnail) {
+        try {
+          // Convert image to WebP
+          const webpBlob = await convertToWebP(editEventThumbnail);
+          
+          // Convert to base64
+          const reader = new FileReader();
+          const base64Promise = new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              if (typeof reader.result === 'string') {
+                // Keep the full data URL (like CreateEventForm does)
+                resolve(reader.result);
+              } else {
+                reject(new Error('Failed to convert to base64'));
+              }
+            };
+            reader.onerror = () => reject(new Error('FileReader error'));
+          });
+          
+          reader.readAsDataURL(webpBlob);
+          const base64Data = await base64Promise;
+          
+          updateData.thumbnailData = base64Data;
+          updateData.thumbnailFileName = `${editEventName.replace(/\s+/g, '_')}_thumbnail.webp`;
+        } catch (conversionError) {
+          console.error('Error converting image:', conversionError);
+          setUpdateError('Failed to process image. Please try again.');
+          return;
+        }
       }
 
       if (!user) {
@@ -165,8 +193,9 @@ export default function EventsList({
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
-        body: formData,
+        body: JSON.stringify(updateData),
       });
 
       if (response.ok) {
