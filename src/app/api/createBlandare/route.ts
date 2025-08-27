@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Parse JSON request body (images are already uploaded to Firebase Storage)
-    const { pdfName: rawPdfName, displayName, uploadedPaths, pageCount } = await req.json();
+    const { pdfName: rawPdfName, displayName, uploadedPaths, pageCount, checkOnly } = await req.json();
     
-    if (!rawPdfName || !uploadedPaths || uploadedPaths.length === 0) {
-        return NextResponse.json({ error: 'Missing required fields: pdfName and uploadedPaths' }, { status: 400 });
+    if (!rawPdfName) {
+        return NextResponse.json({ error: 'Missing required field: pdfName' }, { status: 400 });
     }
 
     // Sanitize pdfName for folder name
@@ -50,6 +50,16 @@ export async function POST(req: NextRequest) {
     if (existingFiles.length > 0) {
       console.log('Existing files:', existingFiles.map(f => f.name));
       return NextResponse.json({ error: 'Bländare already exists' }, { status: 409 });
+    }
+
+    // If this is just a check, return success without doing anything else
+    if (checkOnly) {
+      return NextResponse.json({ success: true, message: 'Name is available' });
+    }
+
+    // Validate required fields for actual upload
+    if (!uploadedPaths || uploadedPaths.length === 0) {
+        return NextResponse.json({ error: 'Missing required fields: uploadedPaths' }, { status: 400 });
     }
 
     // Images are already uploaded to Firebase Storage by the client
