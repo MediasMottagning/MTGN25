@@ -60,27 +60,6 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         token = await user.getIdToken();
       }
 
-      // First, check if bländare already exists before uploading anything
-      const checkRes = await fetch('/api/createBlandare', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` })
-        },
-        body: JSON.stringify({
-          pdfName: sanitizedPdfName,
-          displayName: customName,
-          uploadedPaths: [], // Empty for check-only
-          pageCount: 0, // Dummy value for check
-          checkOnly: true // Flag to indicate this is just a check
-        }),
-      });
-
-      if (!checkRes.ok) {
-        const checkData = await checkRes.json();
-        throw new Error(checkData.error || 'Pre-upload check failed');
-      }
-
       // Convert PDF to images
       const arrayBuffer = await file.arrayBuffer();
       const { pdfjs } = await import('react-pdf');
@@ -123,7 +102,7 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         }
       }
 
-      // Now send the final metadata to the API (without checkOnly flag)
+      // Now send the metadata to the API
       const res = await fetch('/api/createBlandare', {
         method: 'POST',
         headers: {

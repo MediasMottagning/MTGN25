@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Parse JSON request body (images are already uploaded to Firebase Storage)
-    const { pdfName: rawPdfName, displayName, uploadedPaths, pageCount, checkOnly } = await req.json();
+    const { pdfName: rawPdfName, displayName, uploadedPaths, pageCount } = await req.json();
     
     if (!rawPdfName) {
         return NextResponse.json({ error: 'Missing required field: pdfName' }, { status: 400 });
@@ -40,46 +40,39 @@ export async function POST(req: NextRequest) {
     // Sanitize pdfName for folder name
     const pdfName = rawPdfName.replace(/\s+/g, '_').replace(/å|ä/gi, 'a').replace(/ö/gi, 'o').replace(/[^a-zA-Z0-9_.-]/g, '');
 
-    console.log(`Checking for existing bländare: blandare/${pdfName}/`);
+    console.log(`Processing bländare: ${pdfName}`);
     
-    // Check if subfolder already exists
     const bucket = storage.bucket('mottagningen-7063b.appspot.com');
-    const [existingFiles] = await bucket.getFiles({ prefix: `blandare/${pdfName}/` });
-    
-    console.log(`Found ${existingFiles.length} existing files with prefix blandare/${pdfName}/`);
-    if (existingFiles.length > 0) {
-      console.log('Existing files:', existingFiles.map(f => f.name));
-      return NextResponse.json({ error: 'Bländare already exists' }, { status: 409 });
-    }
 
-    // If this is just a check, return success without doing anything else
-    if (checkOnly) {
-      return NextResponse.json({ success: true, message: 'Name is available' });
-    }
-
-    // Validate required fields for actual upload
+    // Validate required fields
     if (!uploadedPaths || uploadedPaths.length === 0) {
         return NextResponse.json({ error: 'Missing required fields: uploadedPaths' }, { status: 400 });
     }
 
     // Images are already uploaded to Firebase Storage by the client
-    // Just store the metadata if displayName is provided
+    // Store the metadata if displayName is provided
     if (displayName) {
-        const metadataFile = bucket.file(`blandare/${pdfName}/metadata.json`);
-        const metadata = {
-            displayName,
-            pdfName,
-            pageCount,
-            uploadedPaths,
-            createdAt: new Date().toISOString(),
-            uploadedBy: decodedToken.uid
-        };
-        await metadataFile.save(JSON.stringify(metadata), {
-            metadata: {
-                contentType: 'application/json',
-            },
-            resumable: false,
-        });
+        try {
+            const metadataFile = bucket.file(`blandare/${pdfName}/metadata.json`);
+            const metadata = {
+                displayName,
+                pdfName,
+                pageCount,
+                uploadedPaths,
+                createdAt: new Date().toISOString(),
+                uploadedBy: decodedToken.uid
+            };
+            await metadataFile.save(JSON.stringify(metadata), {
+                metadata: {
+                    contentType: 'application/json',
+                },
+                resumable: false,
+            });
+        } catch (metadataError) {
+            console.error('Error saving metadata:', metadataError);
+            // Don't fail the entire upload if metadata save fails
+            // The images are already uploaded successfully
+        }
     }
 
     return NextResponse.json({ 
