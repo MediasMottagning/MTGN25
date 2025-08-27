@@ -162,6 +162,9 @@ export default function CreateEventForm({ onEventCreated }: CreateEventFormProps
             autoComplete="off"
             required
           />
+          <p className="text-xs text-gray-500">
+            Make sure the folder is set to "Anyone with the link can view"
+          </p>
         </div>
 
         <div className="space-y-2">

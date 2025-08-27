@@ -1,8 +1,6 @@
 "use client"
 import React, { useRef, useState, useEffect } from 'react';
 import { useAuth } from '../useAuth';
-import { storage } from '../../lib/firebaseConfig';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface UploadBlandareFormProps {
   onBlandareUploaded?: () => void;
@@ -56,22 +54,11 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
       const arrayBuffer = await file.arrayBuffer();
       const { pdfjs } = await import('react-pdf');
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-      
-      // Sanitize pdfName for folder name
-      const sanitizedPdfName = pdfNameWithoutExtension
-        .replace(/\s+/g, '_')
-        .replace(/å|ä/gi, 'a')
-        .replace(/ö/gi, 'o')
-        .replace(/[^a-zA-Z0-9_.-]/g, '');
-      
-      // Upload images directly to Firebase Storage
-      const uploadedPaths: string[] = [];
+      const images: Blob[] = [];
       
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        // Reduce scale for large PDFs to keep file size manageable
-        const scale = pdf.numPages > 20 ? 1.0 : 1.5; // Even more aggressive scaling for Vercel
-        const viewport = page.getViewport({ scale });
+        const viewport = page.getViewport({ scale: 2 });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.width = viewport.width;
@@ -81,41 +68,22 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         }
         await page.render({ canvasContext: context, viewport }).promise;
         
-        // Convert canvas to blob with more compression for Vercel
-        const blob: Blob = await new Promise((resolve) => {
-          canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.6); // Lower quality for smaller size
-        });
-        
-        // Upload directly to Firebase Storage
-        const fileName = `page-${i.toString().padStart(3, '0')}.jpg`;
-        const filePath = `blandare/${sanitizedPdfName}/${fileName}`;
-        const storageRef = ref(storage, filePath);
-        
-        await uploadBytes(storageRef, blob, {
-          customMetadata: {
-            contentType: 'image/jpeg',
-            cacheControl: 'public, max-age=2592000', // 30 days
-          }
-        });
-        
-        uploadedPaths.push(filePath);
+        // Convert canvas to blob
+        const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+        images.push(blob);
       }
 
-      // Store metadata in Firestore via API (images are already uploaded)
-      const metadata = {
-        pdfName: sanitizedPdfName,
-        displayName: customName,
-        uploadedPaths,
-        pageCount: pdf.numPages
-      };
+      const formData = new FormData();
+      images.forEach((img, idx) => {
+        formData.append('images[]', img, `page-${idx + 1}.png`);
+      });
+      formData.append('pdfName', pdfNameWithoutExtension);
+      formData.append('displayName', customName);
       
       const res = await fetch('/api/createBlandare', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(metadata),
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
       });
       
       if (!res.ok) {
