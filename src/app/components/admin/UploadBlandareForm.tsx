@@ -1,6 +1,8 @@
 "use client"
 import React, { useRef, useState, useEffect } from 'react';
 import { useAuth } from '../useAuth';
+import { storage } from '../../lib/firebaseConfig';
+import { ref, uploadBytes } from 'firebase/storage';
 
 interface UploadBlandareFormProps {
   onBlandareUploaded?: () => void;
@@ -28,6 +30,12 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Prevent multiple submissions
+    if (uploading) {
+      return;
+    }
+    
     setSuccess(null);
     setError(null);
 
@@ -42,6 +50,14 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
     }
 
     const pdfNameWithoutExtension = file.name.replace(/\.[^/.]+$/, '');
+    
+    // Sanitize the name (same logic as API)
+    const sanitizedPdfName = pdfNameWithoutExtension
+      .replace(/\s+/g, '_')
+      .replace(/å|ä/gi, 'a')
+      .replace(/ö/gi, 'o')
+      .replace(/[^a-zA-Z0-9_.-]/g, '');
+    
     setUploading(true);
 
     try {
@@ -54,8 +70,15 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
       const arrayBuffer = await file.arrayBuffer();
       const { pdfjs } = await import('react-pdf');
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-      const images: Blob[] = [];
+      const uploadedPaths: string[] = [];
       
+      console.log(`Processing PDF with ${pdf.numPages} pages`);
+      
+      if (pdf.numPages === 0) {
+        throw new Error('PDF has no pages');
+      }
+      
+      // Upload images directly to Firebase Storage
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const viewport = page.getViewport({ scale: 2 });
@@ -68,22 +91,52 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         }
         await page.render({ canvasContext: context, viewport }).promise;
         
-        // Convert canvas to blob
-        const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
-        images.push(blob);
+        // Convert canvas to WebP blob with compression
+        const webpBlob: Blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to convert to WebP'));
+          }, 'image/webp', 0.7); // 70% quality
+        });
+        
+        // Upload directly to Firebase Storage
+        const fileName = `page-${i}.webp`;
+        const storagePath = `blandare/${sanitizedPdfName}/${fileName}`;
+        const storageRef = ref(storage, storagePath);
+        
+        console.log(`Uploading page ${i} to ${storagePath}`);
+        
+        try {
+          await uploadBytes(storageRef, webpBlob);
+          uploadedPaths.push(storagePath);
+          console.log(`Successfully uploaded page ${i}`);
+        } catch (uploadError) {
+          console.error(`Failed to upload page ${i}:`, uploadError);
+          const errorMessage = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          throw new Error(`Failed to upload page ${i}: ${errorMessage}`);
+        }
       }
 
-      const formData = new FormData();
-      images.forEach((img, idx) => {
-        formData.append('images[]', img, `page-${idx + 1}.png`);
-      });
-      formData.append('pdfName', pdfNameWithoutExtension);
-      formData.append('displayName', customName);
+      console.log(`Successfully uploaded ${uploadedPaths.length} pages for ${sanitizedPdfName}`);
       
+      // Validate that we have uploaded paths before sending to API
+      if (uploadedPaths.length === 0) {
+        throw new Error('No images were successfully uploaded');
+      }
+
+      // Now send the metadata to the API
       const res = await fetch('/api/createBlandare', {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { Authorization: `Bearer ${token}` })
+        },
+        body: JSON.stringify({
+          pdfName: sanitizedPdfName,
+          displayName: customName,
+          uploadedPaths: uploadedPaths,
+          pageCount: pdf.numPages
+        }),
       });
       
       if (!res.ok) {

@@ -42,6 +42,49 @@ export default function EventsList({
   const [updateError, setUpdateError] = useState('');
   const [updating, setUpdating] = useState(false);
 
+  const convertToWebP = (file: File, quality: number = 0.8, maxWidth: number = 800, maxHeight: number = 600): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      img.onload = () => {
+        let { width, height } = img;
+
+        if (width > maxWidth || height > maxHeight) {
+          const aspectRatio = width / height;
+
+          if (width > height) {
+            width = Math.min(width, maxWidth);
+            height = width / aspectRatio;
+          } else {
+            height = Math.min(height, maxHeight);
+            width = height * aspectRatio;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+                reject(new Error(`Failed to convert image to WebP. Input file type: ${file.type}, requested output format: image/webp. This may be due to browser limitations or unsupported image format.`));
+            }
+          },
+          'image/webp',
+          quality
+        );
+      };
+
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('sv-SE', { 
@@ -98,18 +141,46 @@ export default function EventsList({
     setUpdating(true);
 
     try {
-      const formData = new FormData();
-      formData.append('eventId', editingEventId!);
-      formData.append('name', editEventName);
-      formData.append('driveUrl', editEventDriveUrl);
-      
-      if (editEventThumbnail) {
-        formData.append('thumbnail', editEventThumbnail);
-      }
+      const updateData: any = {
+        eventId: editingEventId!,
+        name: editEventName,
+        driveUrl: editEventDriveUrl,
+      };
       
       if (editEventDate && editEventHour && editEventMinute) {
         const eventDateTime = new Date(`${editEventDate}T${editEventHour}:${editEventMinute}`);
-        formData.append('eventDate', eventDateTime.toISOString());
+        updateData.eventDate = eventDateTime.toISOString();
+      }
+      
+      if (editEventThumbnail) {
+        try {
+          // Convert image to WebP
+          const webpBlob = await convertToWebP(editEventThumbnail);
+          
+          // Convert to base64
+          const reader = new FileReader();
+          const base64Promise = new Promise<string>((resolve, reject) => {
+            reader.onload = () => {
+              if (typeof reader.result === 'string') {
+                // Keep the full data URL (like CreateEventForm does)
+                resolve(reader.result);
+              } else {
+                reject(new Error('Failed to convert to base64'));
+              }
+            };
+            reader.onerror = () => reject(new Error('FileReader error'));
+          });
+          
+          reader.readAsDataURL(webpBlob);
+          const base64Data = await base64Promise;
+          
+          updateData.thumbnailData = base64Data;
+          updateData.thumbnailFileName = `${editEventName.replace(/\s+/g, '_')}_thumbnail.webp`;
+        } catch (conversionError) {
+          console.error('Error converting image:', conversionError);
+          setUpdateError('Failed to process image. Please try again.');
+          return;
+        }
       }
 
       if (!user) {
@@ -122,8 +193,9 @@ export default function EventsList({
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
-        body: formData,
+        body: JSON.stringify(updateData),
       });
 
       if (response.ok) {
