@@ -40,10 +40,15 @@ export async function POST(req: NextRequest) {
     // Sanitize pdfName for folder name
     const pdfName = rawPdfName.replace(/\s+/g, '_').replace(/å|ä/gi, 'a').replace(/ö/gi, 'o').replace(/[^a-zA-Z0-9_.-]/g, '');
 
+    console.log(`Checking for existing bländare: blandare/${pdfName}/`);
+    
     // Check if subfolder already exists
     const bucket = storage.bucket('mottagningen-7063b.appspot.com');
     const [existingFiles] = await bucket.getFiles({ prefix: `blandare/${pdfName}/` });
+    
+    console.log(`Found ${existingFiles.length} existing files with prefix blandare/${pdfName}/`);
     if (existingFiles.length > 0) {
+      console.log('Existing files:', existingFiles.map(f => f.name));
       return NextResponse.json({ error: 'Bländare already exists' }, { status: 409 });
     }
 
