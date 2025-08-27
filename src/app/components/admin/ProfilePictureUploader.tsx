@@ -52,8 +52,8 @@ export default function ProfilePictureUploader() {
       setImagePreview(null);
     } catch (error: unknown) {
       console.error('Error uploading profile picture:', error);
-      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as any).message === 'string') {
-        setError((error as { message: string }).message);
+      if (error instanceof Error) {
+        setError(error.message);
       } else {
         setError('Failed to upload profile picture');
       }
