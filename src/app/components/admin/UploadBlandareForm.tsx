@@ -44,6 +44,14 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
     }
 
     const pdfNameWithoutExtension = file.name.replace(/\.[^/.]+$/, '');
+    
+    // Sanitize the name (same logic as API)
+    const sanitizedPdfName = pdfNameWithoutExtension
+      .replace(/\s+/g, '_')
+      .replace(/å|ä/gi, 'a')
+      .replace(/ö/gi, 'o')
+      .replace(/[^a-zA-Z0-9_.-]/g, '');
+    
     setUploading(true);
 
     try {
@@ -81,7 +89,7 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         
         // Upload directly to Firebase Storage
         const fileName = `page-${i}.webp`;
-        const storagePath = `blandare/${pdfNameWithoutExtension}/${fileName}`;
+        const storagePath = `blandare/${sanitizedPdfName}/${fileName}`;
         const storageRef = ref(storage, storagePath);
         
         try {
@@ -102,7 +110,7 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
           ...(token && { Authorization: `Bearer ${token}` })
         },
         body: JSON.stringify({
-          pdfName: pdfNameWithoutExtension,
+          pdfName: sanitizedPdfName,
           displayName: customName,
           uploadedPaths: uploadedPaths,
           pageCount: pdf.numPages
