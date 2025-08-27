@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth, db, storage } from '../../lib/firebaseAdmin';
 import admin from 'firebase-admin';
 
+// Configure route to handle large files
+export const runtime = 'nodejs';
+export const maxDuration = 60; // 60 seconds timeout (Vercel limit)
+export const dynamic = 'force-dynamic';
+
 /* API for updating existing events */
 export async function PUT(req: NextRequest) {
     const authHeader = req.headers.get('Authorization');
@@ -23,12 +28,19 @@ export async function PUT(req: NextRequest) {
             return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
         }
 
-        const body = await req.json();
+        let body;
+        try {
+            body = await req.json();
+        } catch (jsonError) {
+            console.error('Failed to parse JSON body:', jsonError);
+            return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+        }
+
         const { eventId, name, driveUrl, thumbnailData, thumbnailFileName, eventDate } = body;
 
-        if (!eventId || !name || !driveUrl || !eventDate) {
+        if (!eventId || !name || !driveUrl) {
             return NextResponse.json({ 
-                error: 'Missing required fields: eventId, name, driveUrl, and eventDate are required' 
+                error: 'Missing required fields: eventId, name, and driveUrl are required' 
             }, { status: 400 });
         }
 
@@ -44,8 +56,12 @@ export async function PUT(req: NextRequest) {
         const updateData: any = {
             name: name.trim(),
             driveUrl: driveUrl.trim(),
-            eventDate: admin.firestore.Timestamp.fromDate(new Date(eventDate)),
         };
+
+        // Only update eventDate if provided
+        if (eventDate) {
+            updateData.eventDate = admin.firestore.Timestamp.fromDate(new Date(eventDate));
+        }
 
         // Handle thumbnail update if provided
         if (thumbnailData && thumbnailFileName) {

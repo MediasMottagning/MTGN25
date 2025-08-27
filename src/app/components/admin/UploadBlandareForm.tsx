@@ -1,6 +1,8 @@
 "use client"
 import React, { useRef, useState, useEffect } from 'react';
 import { useAuth } from '../useAuth';
+import { storage } from '../../lib/firebaseConfig';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface UploadBlandareFormProps {
   onBlandareUploaded?: () => void;
@@ -54,12 +56,21 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
       const arrayBuffer = await file.arrayBuffer();
       const { pdfjs } = await import('react-pdf');
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-      const images: Blob[] = [];
+      
+      // Sanitize pdfName for folder name
+      const sanitizedPdfName = pdfNameWithoutExtension
+        .replace(/\s+/g, '_')
+        .replace(/å|ä/gi, 'a')
+        .replace(/ö/gi, 'o')
+        .replace(/[^a-zA-Z0-9_.-]/g, '');
+      
+      // Upload images directly to Firebase Storage
+      const uploadedPaths: string[] = [];
       
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         // Reduce scale for large PDFs to keep file size manageable
-        const scale = pdf.numPages > 20 ? 1.5 : 2;
+        const scale = pdf.numPages > 20 ? 1.0 : 1.5; // Even more aggressive scaling for Vercel
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
@@ -70,24 +81,41 @@ export default function UploadBlandareForm({ onBlandareUploaded }: UploadBlandar
         }
         await page.render({ canvasContext: context, viewport }).promise;
         
-        // Convert canvas to blob with compression
+        // Convert canvas to blob with more compression for Vercel
         const blob: Blob = await new Promise((resolve) => {
-          canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.8); // Use JPEG with 80% quality for smaller size
+          canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.6); // Lower quality for smaller size
         });
-        images.push(blob);
+        
+        // Upload directly to Firebase Storage
+        const fileName = `page-${i.toString().padStart(3, '0')}.jpg`;
+        const filePath = `blandare/${sanitizedPdfName}/${fileName}`;
+        const storageRef = ref(storage, filePath);
+        
+        await uploadBytes(storageRef, blob, {
+          customMetadata: {
+            contentType: 'image/jpeg',
+            cacheControl: 'public, max-age=2592000', // 30 days
+          }
+        });
+        
+        uploadedPaths.push(filePath);
       }
 
-      const formData = new FormData();
-      images.forEach((img, idx) => {
-        formData.append('images[]', img, `page-${idx + 1}.jpg`);
-      });
-      formData.append('pdfName', pdfNameWithoutExtension);
-      formData.append('displayName', customName);
+      // Store metadata in Firestore via API (images are already uploaded)
+      const metadata = {
+        pdfName: sanitizedPdfName,
+        displayName: customName,
+        uploadedPaths,
+        pageCount: pdf.numPages
+      };
       
       const res = await fetch('/api/createBlandare', {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(metadata),
       });
       
       if (!res.ok) {
